@@ -7,9 +7,6 @@ import threading
 import time
 
 
-#eqweqweqwe
-
-
 # === Настройки ===
 USER = "admin"
 PASSWORD = "qweR-123"
