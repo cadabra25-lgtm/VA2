@@ -1,0 +1,5 @@
+py -m pip install  ultralytics opencv-python numpy
+
+py -m pip install decord
+
+py -m PyInstaller --onedir --windowed --add-binary "C:\Users\User\AppData\Local\Programs\Python\Python311\Lib\site-packages\decord\decord.dll;decord" C:\Users\User\Desktop\va-code\va-decord-treads.py
