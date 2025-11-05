@@ -9,6 +9,9 @@ import time
 #dasdasdas
 
 
+#eqweqweqwe
+
+
 # === Настройки ===
 USER = "admin"
 PASSWORD = "qweR-123"
