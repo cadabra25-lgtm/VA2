@@ -353,9 +353,9 @@ class App:
         btn_frame = tk.Frame(root)
         btn_frame.pack(pady=10)
         tk.Button(btn_frame, text="Выбрать зону", command=self.select_roi,
-                  bg="lightblue", height=2, font=("Arial", 10)).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Старт", command=self.start_processing,
-                  bg="green", fg="white", height=2, font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=5)
+                  bg="lightgray", fg="black", width=16, height=2, font=("Arial", 10)).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="СТАРТ", command=self.start_processing,
+                  bg="lightgray", fg="black", width=16, height=2, font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=5)
 
         # Прогресс по файлам
         file_progress_frame = tk.Frame(root)
