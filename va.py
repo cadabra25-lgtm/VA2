@@ -598,6 +598,10 @@ class App:
         set_preview_enabled(False)
         self.root.destroy()
 
+def run():
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
 
 if __name__ == "__main__":
     root = tk.Tk()
