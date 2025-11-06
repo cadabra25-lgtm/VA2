@@ -310,7 +310,7 @@ def process_folder(folder_path, start_minute, skip_frames, batch_size, roi, min_
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Анализ видео на присутствие людей")
+        self.root.title("Анализ видео")
         self.root.geometry("950x700")  # немного расширили окно
         self.root.resizable(False, False)
 
