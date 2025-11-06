@@ -3,6 +3,24 @@ import os
 import sys
 import importlib.util
 
+import tkinter as tk
+import tkinter.ttk as ttk
+from tkinter import filedialog, messagebox
+import threading
+import queue
+import sys
+import os
+import time
+from datetime import datetime
+from decord import VideoReader, cpu
+import numpy as np
+from ultralytics import YOLO
+from PIL import Image, ImageTk
+import glob
+import cv2
+import subprocess
+import platform
+
 def main():
     # Путь к внешнему скрипту — рядом с .exe
     if getattr(sys, 'frozen', False):
