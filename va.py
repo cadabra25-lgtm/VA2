@@ -23,8 +23,11 @@ import uuid
 # ==============================
 # Константы для Hikvision
 # ==============================
-USER = "admin"
-PASSWORD = "qweR-123"
+#USER = "admin"
+#PASSWORD = "qweR-123"
+USER = "Operator"
+PASSWORD = "Pobeda123"
+
 NVR_IPS = ["172.28.10.21", "172.28.10.22", "172.28.10.23", "172.28.10.24", "172.28.10.25"]
 
 
@@ -72,6 +75,70 @@ def get_cameras(ip):
     except Exception as e:
         print(f"⚠️ Ошибка подключения к {ip}: {e}")
         return []
+
+
+def parse_proxy_channels(xml_content):
+    """Парсит XML с информацией о камерах и возвращает список с именами, IP и channel_id"""
+    try:
+        root = etree.fromstring(xml_content)
+        for elem in root.iter():
+            if elem.tag.startswith('{'):
+                elem.tag = elem.tag.split('}', 1)[1]
+
+        cameras = []
+        for channel in root.xpath('.//InputProxyChannel'):
+            ch_id_elem = channel.find('id')
+            name_elem = channel.find('name')
+            ip_elem = channel.find('.//ipAddress')
+
+            if ch_id_elem is not None and ip_elem is not None:
+                try:
+                    ch_id = int(ch_id_elem.text)
+                    name = name_elem.text.strip() if name_elem is not None and name_elem.text else f"Камера {ch_id}"
+                    ip = ip_elem.text.strip()
+                    if ip and ip != "0.0.0.0":
+                        cameras.append({
+                            'channel_id': ch_id,
+                            'name': name,
+                            'ip': ip
+                        })
+                except (ValueError, AttributeError):
+                    continue
+        cameras.sort(key=lambda x: x['channel_id'])
+        return cameras
+    except Exception as e:
+        print(f"❌ Ошибка парсинга proxy channels: {e}")
+        return []
+
+
+def get_camera_list_from_nvr(ip):
+    """Получает список камер с именем и IP адресом с одного NVR"""
+    auth = httpx.DigestAuth(USER, PASSWORD)
+    url = f"http://{ip}/ISAPI/ContentMgmt/InputProxy/channels"
+    try:
+        with httpx.Client(auth=auth, verify=False, timeout=10) as client:
+            response = client.get(url)
+            if response.status_code == 200:
+                cameras = parse_proxy_channels(response.content)
+                # Добавляем информацию о NVR к каждой камере
+                for camera in cameras:
+                    camera['nvr_ip'] = ip
+                return cameras
+            else:
+                print(f"❌ HTTP {response.status_code} при запросе proxy channels с {ip}")
+                return []
+    except Exception as e:
+        print(f"⚠️ Ошибка подключения к {ip}: {e}")
+        return []
+
+
+def get_all_cameras_from_all_nvrs():
+    """Собирает список всех камер со всех NVR"""
+    all_cameras = []
+    for nvr_ip in NVR_IPS:
+        cameras = get_camera_list_from_nvr(nvr_ip)
+        all_cameras.extend(cameras)
+    return all_cameras
 
 
 def parse_search_results(xml_content):
@@ -785,31 +852,29 @@ class App:
 class HikvisionDownloaderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Hikvision Video Downloader")
+        self.root.title("Загрузить с регистратора")
         self.root.resizable(False, False)
 
         window_width = 720
-        window_height = 540
+        window_height = 520
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
         x = (screen_width // 2) - (window_width // 2)
         y = (screen_height // 2) - (window_height // 2)
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
-        self.selected_nvr = tk.StringVar(value=NVR_IPS[0])
-        self.selected_camera = tk.StringVar(value="")
-        self.camera_numbers = []
+        self.selected_camera_name = tk.StringVar(value="")
         self.recordings = []
         self.selected_recording = tk.StringVar()
+        self.all_cameras_list = []  # Список всех камер со всех NVR: [{name, nvr_ip, channel_id, ip}, ...]
+        self.camera_name_to_info = {}  # Словарь для быстрого поиска информации о камере по имени
+        self.selected_camera_info = None  # Информация о выбранной камере
 
-        ttk.Label(root, text="Регистратор:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.nvr_combo = ttk.Combobox(root, textvariable=self.selected_nvr, values=NVR_IPS, state="readonly", width=15)
-        self.nvr_combo.grid(row=0, column=1, padx=5, pady=10, sticky="w")
-        self.nvr_combo.bind("<<ComboboxSelected>>", self.on_nvr_selected)
-
-        ttk.Label(root, text="Камера:").grid(row=0, column=2, padx=10, pady=10, sticky="w")
-        self.camera_combo = ttk.Combobox(root, textvariable=self.selected_camera, values=[], state="disabled", width=5)
-        self.camera_combo.grid(row=0, column=3, padx=5, pady=10, sticky="w")
+        # Название камеры
+        ttk.Label(root, text="Название камеры:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        self.camera_name_combo = ttk.Combobox(root, textvariable=self.selected_camera_name, values=[], state="disabled", width=50)
+        self.camera_name_combo.grid(row=0, column=1, columnspan=3, padx=5, pady=10, sticky="ew")
+        self.camera_name_combo.bind("<<ComboboxSelected>>", self.on_camera_name_selected)
 
         ttk.Label(root, text="Начало:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.start_date = ttk.Entry(root, width=12)
@@ -858,12 +923,14 @@ class HikvisionDownloaderApp:
         )
         self._update_progress_bar(0)  # инициализация
 
-        self.size_label = ttk.Label(root, text="Готово к загрузке")
+        self.size_label = ttk.Label(root, text="Загрузка списка камер...")
         self.size_label.grid(row=7, column=0, columnspan=4, pady=5)
 
         root.columnconfigure(0, weight=1)
-
-        self.root.after(100, self.on_nvr_selected)
+        root.columnconfigure(1, weight=1)
+        
+        # Автоматически запускаем загрузку камер при открытии окна
+        self.root.after(100, self.request_all_cameras)
 
     def _update_progress_bar(self, percent):
         """Обновляет только визуальные элементы прогресс-бара без изменения логики."""
@@ -877,32 +944,54 @@ class HikvisionDownloaderApp:
         self.progress_canvas.coords("progress_text", width // 2, 12)
         self.progress_canvas.itemconfig("progress_text", text=f"{int(percent)}%")
 
-    def on_nvr_selected(self, event=None):
-        ip = self.selected_nvr.get()
-        self.load_segments_btn.config(state="disabled")
-        self.camera_combo.config(state="disabled")
-        self.camera_combo.set("")
-        threading.Thread(target=self._fetch_cameras, args=(ip,), daemon=True).start()
+    def request_all_cameras(self):
+        """Запрашивает список всех камер со всех NVR"""
+        self.camera_name_combo.config(state="disabled")
+        self.size_label.config(text="Запрос списка камер...")
+        threading.Thread(target=self._fetch_all_cameras, daemon=True).start()
 
-    def _fetch_cameras(self, ip):
-        camera_numbers = get_cameras(ip)
-        self.root.after(0, self._update_camera_list, camera_numbers)
+    def _fetch_all_cameras(self):
+        """Собирает все камеры со всех NVR в отдельном потоке"""
+        all_cameras = get_all_cameras_from_all_nvrs()
+        self.root.after(0, self._update_all_cameras_list, all_cameras)
 
-    def _update_camera_list(self, camera_numbers):
-        if camera_numbers:
-            self.camera_numbers = camera_numbers
-            camera_strs = [str(n) for n in camera_numbers]
-            self.camera_combo["values"] = camera_strs
-            self.camera_combo.set(camera_strs[0])
-            self.camera_combo.config(state="readonly")
-            self.load_segments_btn.config(state="normal")
+    def _update_all_cameras_list(self, cameras):
+        """Обновляет список камер в интерфейсе"""
+        self.all_cameras_list = cameras
+        
+        if cameras:
+            # Создаем список имен камер для отображения
+            camera_names = []
+            self.camera_name_to_info = {}
+            
+            for cam in cameras:
+                # Формируем отображаемое имя: "Имя камеры (NVR_IP)"
+                display_name = f"{cam['name']} ({cam['nvr_ip']})"
+                camera_names.append(display_name)
+                # Сохраняем информацию о камере для быстрого доступа
+                self.camera_name_to_info[display_name] = cam
+            
+            self.camera_name_combo["values"] = camera_names
+            self.camera_name_combo.config(state="readonly")
+            self.size_label.config(text=f"Найдено {len(cameras)} камер")
         else:
-            self.camera_numbers = []
-            self.camera_combo["values"] = []
-            self.camera_combo.set("")
-            self.camera_combo.config(state="disabled")
+            self.camera_name_combo["values"] = []
+            self.camera_name_combo.config(state="readonly")
+            self.size_label.config(text="Готово к загрузке")
+            messagebox.showwarning("Внимание", "Не удалось получить список камер с регистраторов")
+
+    def on_camera_name_selected(self, event=None):
+        """Обрабатывает выбор камеры по имени - сохраняет информацию о камере"""
+        selected_name = self.selected_camera_name.get()
+        if not selected_name or selected_name not in self.camera_name_to_info:
+            self.selected_camera_info = None
             self.load_segments_btn.config(state="disabled")
-            messagebox.showwarning("Внимание", f"Не удалось загрузить камеры с {self.selected_nvr.get()}")
+            return
+        
+        # Сохраняем информацию о выбранной камере
+        self.selected_camera_info = self.camera_name_to_info[selected_name]
+        # Активируем кнопку загрузки записей
+        self.load_segments_btn.config(state="normal")
 
     def update_progress(self, percent, downloaded_mb=0, total_mb=0, mode="bytes"):
         if mode == "bytes":
@@ -913,20 +1002,18 @@ class HikvisionDownloaderApp:
         self._update_progress_bar(percent)
 
     def load_segments(self):
-        ip = self.selected_nvr.get()
-        cam_str = self.selected_camera.get()
-        if not cam_str or not self.camera_numbers:
-            messagebox.showerror("Ошибка", "Нет доступных камер")
+        if not self.selected_camera_info:
+            messagebox.showerror("Ошибка", "Выберите камеру")
             return
 
-        try:
-            cam_num = int(cam_str)
-            if cam_num not in self.camera_numbers:
-                raise ValueError
-            track_id = cam_num * 100 + 1
-        except (ValueError, TypeError):
-            messagebox.showerror("Ошибка", "Некорректный выбор камеры")
-            return
+        # Получаем информацию о выбранной камере
+        nvr_ip = self.selected_camera_info['nvr_ip']
+        channel_id = self.selected_camera_info['channel_id']
+        
+        # Вычисляем track_id на основе channel_id
+        # Обычно track_id = channel_id * 100 + 1, но может отличаться в зависимости от системы
+        # Попробуем сначала использовать channel_id напрямую, как номер камеры
+        track_id = channel_id * 100 + 1
 
         start_iso = f"{self.start_date.get()}T{self.start_time.get()}Z"
         end_iso = f"{self.end_date.get()}T{self.end_time.get()}Z"
@@ -941,8 +1028,9 @@ class HikvisionDownloaderApp:
         self.load_segments_btn.config(state="disabled")
         self.recordings_combo.set("")
         self.recordings = []
+        self.size_label.config(text="Поиск записей...")
 
-        threading.Thread(target=self._fetch_recordings, args=(ip, track_id, start_iso, end_iso), daemon=True).start()
+        threading.Thread(target=self._fetch_recordings, args=(nvr_ip, track_id, start_iso, end_iso), daemon=True).start()
 
     def _fetch_recordings(self, ip, track_id, start_iso, end_iso):
         recordings = search_recordings_all(ip, track_id, start_iso, end_iso)
@@ -953,6 +1041,7 @@ class HikvisionDownloaderApp:
         if not recordings:
             messagebox.showinfo("Информация", "Записи не найдены")
             self.recordings_combo["values"] = []
+            self.size_label.config(text="Готово к загрузке")
             return
 
         self.recordings = recordings
@@ -968,10 +1057,15 @@ class HikvisionDownloaderApp:
         self.recordings_combo["values"] = display_list
         if display_list:
             self.recordings_combo.current(0)
+        self.size_label.config(text=f"Найдено {len(recordings)} записей")
 
     def download_video(self):
         if not self.recordings:
             messagebox.showwarning("Предупреждение", "Сначала загрузите список записей")
+            return
+
+        if not self.selected_camera_info:
+            messagebox.showerror("Ошибка", "Камера не выбрана")
             return
 
         idx = self.recordings_combo.current()
@@ -992,12 +1086,12 @@ class HikvisionDownloaderApp:
         if not filepath:
             return
 
-        ip = self.selected_nvr.get()
+        nvr_ip = self.selected_camera_info['nvr_ip']
         self.download_btn.config(state="disabled")
         self.download_all_btn.config(state="disabled")
         self.update_progress(0, 0, 0, "bytes")
 
-        threading.Thread(target=self._download_file, args=(ip, rtsp_url, filepath), daemon=True).start()
+        threading.Thread(target=self._download_file, args=(nvr_ip, rtsp_url, filepath), daemon=True).start()
 
     def _download_file(self, ip, rtsp_url, filepath):
         auth = httpx.DigestAuth(USER, PASSWORD)
@@ -1051,17 +1145,21 @@ class HikvisionDownloaderApp:
             messagebox.showwarning("Предупреждение", "Сначала загрузите список записей")
             return
 
+        if not self.selected_camera_info:
+            messagebox.showerror("Ошибка", "Камера не выбрана")
+            return
+
         folderpath = filedialog.askdirectory(title="Выберите папку для сохранения всех видео")
         if not folderpath:
             return
 
-        ip = self.selected_nvr.get()
+        nvr_ip = self.selected_camera_info['nvr_ip']
         self.download_btn.config(state="disabled")
         self.download_all_btn.config(state="disabled")
         self._total_files = len(self.recordings)
         self.update_progress(0, 0, 0, "files")
 
-        threading.Thread(target=self._download_all_files, args=(ip, folderpath), daemon=True).start()
+        threading.Thread(target=self._download_all_files, args=(nvr_ip, folderpath), daemon=True).start()
 
     def _download_all_files(self, ip, folderpath):
         auth = httpx.DigestAuth(USER, PASSWORD)
