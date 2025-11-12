@@ -7,6 +7,7 @@ import sys
 import os
 import time
 from datetime import datetime, date
+import calendar
 from decord import VideoReader, cpu
 import numpy as np
 from ultralytics import YOLO
@@ -847,6 +848,139 @@ class App:
 
 
 # ==============================
+# Диалог выбора даты и времени
+# ==============================
+class DateTimePickerDialog(tk.Toplevel):
+    def __init__(self, parent, initial_dt, on_select):
+        super().__init__(parent)
+        self.title("Выбор даты и времени")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self.on_select = on_select
+        self.initial_dt = initial_dt or datetime.now()
+        self.current_year = self.initial_dt.year
+        self.current_month = self.initial_dt.month
+        self.selected_date = self.initial_dt.date()
+
+        self.hour_var = tk.IntVar(value=self.initial_dt.hour)
+        self.minute_var = tk.IntVar(value=self.initial_dt.minute)
+        self.second_var = tk.IntVar(value=self.initial_dt.second)
+
+        header_frame = ttk.Frame(self)
+        header_frame.pack(fill="x", padx=10, pady=(10, 5))
+
+        ttk.Button(header_frame, text="<", width=3, command=lambda: self.change_month(-1)).pack(side="left")
+        self.month_label = ttk.Label(header_frame, text="", anchor="center", width=20)
+        self.month_label.pack(side="left", expand=True)
+        ttk.Button(header_frame, text=">", width=3, command=lambda: self.change_month(1)).pack(side="right")
+
+        self.calendar_frame = ttk.Frame(self)
+        self.calendar_frame.pack(padx=10, pady=5)
+
+        time_frame = ttk.Frame(self)
+        time_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(time_frame, text="Время:").pack(side="left", padx=(0, 5))
+        self.hour_spin = tk.Spinbox(time_frame, from_=0, to=23, wrap=True, width=3, textvariable=self.hour_var, format="%02.0f")
+        self.hour_spin.pack(side="left")
+        ttk.Label(time_frame, text=":").pack(side="left")
+        self.minute_spin = tk.Spinbox(time_frame, from_=0, to=59, wrap=True, width=3, textvariable=self.minute_var, format="%02.0f")
+        self.minute_spin.pack(side="left")
+        ttk.Label(time_frame, text=":").pack(side="left")
+        self.second_spin = tk.Spinbox(time_frame, from_=0, to=59, wrap=True, width=3, textvariable=self.second_var, format="%02.0f")
+        self.second_spin.pack(side="left")
+
+        buttons_frame = ttk.Frame(self)
+        buttons_frame.pack(fill="x", padx=10, pady=(5, 10))
+        ttk.Button(buttons_frame, text="Отмена", command=self.destroy).pack(side="right")
+        ttk.Button(buttons_frame, text="OK", command=self.confirm).pack(side="right", padx=(0, 5))
+
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        self.build_calendar()
+        self.update_idletasks()
+        try:
+            w = self.winfo_width()
+            h = self.winfo_height()
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            x = (sw // 2) - (w // 2)
+            y = (sh // 2) - (h // 2)
+            self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+    def build_calendar(self):
+        for widget in self.calendar_frame.winfo_children():
+            widget.destroy()
+
+        month_name = datetime(self.current_year, self.current_month, 1).strftime("%B %Y")
+        self.month_label.config(text=month_name.capitalize())
+
+        weekday_names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        for idx, name in enumerate(weekday_names):
+            ttk.Label(self.calendar_frame, text=name, width=4, anchor="center").grid(row=0, column=idx, padx=1, pady=1)
+
+        month_days = calendar.monthcalendar(self.current_year, self.current_month)
+        for row_idx, week in enumerate(month_days, start=1):
+            for col_idx, day in enumerate(week):
+                if day == 0:
+                    ttk.Label(self.calendar_frame, text="", width=4).grid(row=row_idx, column=col_idx, padx=1, pady=1)
+                else:
+                    btn = tk.Button(
+                        self.calendar_frame,
+                        text=str(day),
+                        width=4,
+                        relief="raised",
+                        command=lambda d=day: self.select_day(d)
+                    )
+                    if (self.selected_date.year == self.current_year and
+                            self.selected_date.month == self.current_month and
+                            self.selected_date.day == day):
+                        btn.config(bg="#1976D2", fg="white")
+                    else:
+                        btn.config(bg="white")
+                    btn.grid(row=row_idx, column=col_idx, padx=1, pady=1)
+
+    def select_day(self, day):
+        self.selected_date = date(self.current_year, self.current_month, day)
+        self.build_calendar()
+
+    def change_month(self, delta):
+        new_month = self.current_month + delta
+        new_year = self.current_year
+        if new_month < 1:
+            new_month = 12
+            new_year -= 1
+        elif new_month > 12:
+            new_month = 1
+            new_year += 1
+        self.current_month = new_month
+        self.current_year = new_year
+        days_in_month = calendar.monthrange(self.current_year, self.current_month)[1]
+        day = min(self.selected_date.day, days_in_month)
+        self.selected_date = date(self.current_year, self.current_month, day)
+        self.build_calendar()
+
+    def confirm(self):
+        try:
+            selected_dt = datetime(
+                self.selected_date.year,
+                self.selected_date.month,
+                self.selected_date.day,
+                int(self.hour_var.get()),
+                int(self.minute_var.get()),
+                int(self.second_var.get())
+            )
+        except ValueError:
+            messagebox.showerror("Ошибка", "Некорректная дата или время")
+            return
+        self.on_select(selected_dt)
+        self.destroy()
+
+
+# ==============================
 # Класс HikvisionDownloaderApp
 # ==============================
 class HikvisionDownloaderApp:
@@ -873,44 +1007,54 @@ class HikvisionDownloaderApp:
         # Название камеры
         ttk.Label(root, text="Название камеры:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
         self.camera_name_combo = ttk.Combobox(root, textvariable=self.selected_camera_name, values=[], state="disabled", width=50)
-        self.camera_name_combo.grid(row=0, column=1, columnspan=3, padx=5, pady=10, sticky="ew")
+        self.camera_name_combo.grid(row=0, column=1, columnspan=4, padx=5, pady=10, sticky="ew")
         self.camera_name_combo.bind("<<ComboboxSelected>>", self.on_camera_name_selected)
 
         ttk.Label(root, text="Начало:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.start_date = ttk.Entry(root, width=12)
-        self.start_date.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-        self.start_time = ttk.Entry(root, width=8)
-        self.start_time.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        self.start_date_var = tk.StringVar()
+        self.start_time_var = tk.StringVar()
+        start_frame = ttk.Frame(root)
+        start_frame.grid(row=1, column=1, columnspan=3, padx=5, pady=5, sticky="w")
+        self.start_date = ttk.Entry(start_frame, width=12, textvariable=self.start_date_var, state="readonly")
+        self.start_date.pack(side="left")
+        self.start_time = ttk.Entry(start_frame, width=8, textvariable=self.start_time_var, state="readonly")
+        self.start_time.pack(side="left", padx=(5, 0))
+        ttk.Button(start_frame, text="Выбрать", command=lambda: self.open_datetime_picker("start")).pack(side="left", padx=(5, 0))
 
         ttk.Label(root, text="Конец:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.end_date = ttk.Entry(root, width=12)
-        self.end_date.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-        self.end_time = ttk.Entry(root, width=8)
-        self.end_time.grid(row=2, column=2, padx=5, pady=5, sticky="w")
+        self.end_date_var = tk.StringVar()
+        self.end_time_var = tk.StringVar()
+        end_frame = ttk.Frame(root)
+        end_frame.grid(row=2, column=1, columnspan=3, padx=5, pady=5, sticky="w")
+        self.end_date = ttk.Entry(end_frame, width=12, textvariable=self.end_date_var, state="readonly")
+        self.end_date.pack(side="left")
+        self.end_time = ttk.Entry(end_frame, width=8, textvariable=self.end_time_var, state="readonly")
+        self.end_time.pack(side="left", padx=(5, 0))
+        ttk.Button(end_frame, text="Выбрать", command=lambda: self.open_datetime_picker("end")).pack(side="left", padx=(5, 0))
 
         today = date.today().strftime("%Y-%m-%d")
-        self.start_date.insert(0, today)
-        self.start_time.insert(0, "00:00:00")
-        self.end_date.insert(0, today)
-        self.end_time.insert(0, "23:59:59")
+        self.start_date_var.set(today)
+        self.start_time_var.set("00:00:00")
+        self.end_date_var.set(today)
+        self.end_time_var.set("23:59:59")
 
         self.load_segments_btn = ttk.Button(root, text="Загрузить записи", command=self.load_segments, state="disabled")
-        self.load_segments_btn.grid(row=1, column=3, rowspan=2, padx=10, pady=10, sticky="ns")
+        self.load_segments_btn.grid(row=1, column=4, rowspan=2, padx=10, pady=10, sticky="ns")
 
         ttk.Label(root, text="Доступные записи:").grid(row=3, column=0, padx=10, pady=10, sticky="w")
         self.recordings_combo = ttk.Combobox(root, textvariable=self.selected_recording, state="readonly", width=85)
-        self.recordings_combo.grid(row=4, column=0, columnspan=4, padx=10, pady=5, sticky="ew")
+        self.recordings_combo.grid(row=4, column=0, columnspan=5, padx=10, pady=5, sticky="ew")
 
         # Две кнопки в одной строке
         button_frame = ttk.Frame(root)
-        button_frame.grid(row=5, column=0, columnspan=4, pady=15)
+        button_frame.grid(row=5, column=0, columnspan=5, pady=15)
         self.download_btn = ttk.Button(button_frame, text="Загрузить видео", command=self.download_video)
         self.download_btn.pack(side="left", padx=(0, 10))
         self.download_all_btn = ttk.Button(button_frame, text="Загрузить ВСЕ видео", command=self.download_all_videos)
         self.download_all_btn.pack(side="left")
 
         self.progress_frame = tk.Frame(root)
-        self.progress_frame.grid(row=6, column=0, columnspan=4, pady=5, sticky="ew")
+        self.progress_frame.grid(row=6, column=0, columnspan=5, pady=5, sticky="ew")
         self.progress_frame.columnconfigure(0, weight=1)
 
         self.progress_canvas = tk.Canvas(self.progress_frame, height=25, bg="white", relief="sunken", bd=1)
@@ -924,10 +1068,13 @@ class HikvisionDownloaderApp:
         self._update_progress_bar(0)  # инициализация
 
         self.size_label = ttk.Label(root, text="Загрузка списка камер...")
-        self.size_label.grid(row=7, column=0, columnspan=4, pady=5)
+        self.size_label.grid(row=7, column=0, columnspan=5, pady=5)
 
-        root.columnconfigure(0, weight=1)
+        root.columnconfigure(0, weight=0)
         root.columnconfigure(1, weight=1)
+        root.columnconfigure(2, weight=0)
+        root.columnconfigure(3, weight=0)
+        root.columnconfigure(4, weight=0)
         
         # Автоматически запускаем загрузку камер при открытии окна
         self.root.after(100, self.request_all_cameras)
@@ -993,6 +1140,32 @@ class HikvisionDownloaderApp:
         # Активируем кнопку загрузки записей
         self.load_segments_btn.config(state="normal")
 
+    def open_datetime_picker(self, mode):
+        """Открывает диалог выбора даты и времени"""
+        if mode == "start":
+            date_str = self.start_date_var.get()
+            time_str = self.start_time_var.get()
+        else:
+            date_str = self.end_date_var.get()
+            time_str = self.end_time_var.get()
+
+        try:
+            current_dt = datetime.fromisoformat(f"{date_str}T{time_str}")
+        except ValueError:
+            current_dt = datetime.now()
+
+        def on_selected(selected_dt):
+            date_formatted = selected_dt.strftime("%Y-%m-%d")
+            time_formatted = selected_dt.strftime("%H:%M:%S")
+            if mode == "start":
+                self.start_date_var.set(date_formatted)
+                self.start_time_var.set(time_formatted)
+            else:
+                self.end_date_var.set(date_formatted)
+                self.end_time_var.set(time_formatted)
+
+        DateTimePickerDialog(self.root, current_dt, on_selected)
+
     def update_progress(self, percent, downloaded_mb=0, total_mb=0, mode="bytes"):
         if mode == "bytes":
             self.size_label.config(text=f"{downloaded_mb:.1f} из {total_mb:.1f} МБ")
@@ -1015,8 +1188,8 @@ class HikvisionDownloaderApp:
         # Попробуем сначала использовать channel_id напрямую, как номер камеры
         track_id = channel_id * 100 + 1
 
-        start_iso = f"{self.start_date.get()}T{self.start_time.get()}Z"
-        end_iso = f"{self.end_date.get()}T{self.end_time.get()}Z"
+        start_iso = f"{self.start_date_var.get()}T{self.start_time_var.get()}Z"
+        end_iso = f"{self.end_date_var.get()}T{self.end_time_var.get()}Z"
 
         try:
             datetime.fromisoformat(start_iso.replace('Z', ''))
